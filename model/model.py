@@ -1,3 +1,5 @@
+import torch
+import torch.nn as nn
 from transformers import PretrainedConfig
 
 
@@ -5,32 +7,32 @@ class ZeusMindConfig(PretrainedConfig):
     model_type = "zeusmind"
 
     def __init__(
-        self,
-        dropout: float = 0.0,
-        bos_token_id: int = 1,
-        eos_token_id: int = 2,
-        hidden_act: str = "silu",
-        hidden_size: int = 512,
-        intermediate_size: int = None,
-        max_position_embeddings: int = 32768,
-        num_attention_heads: int = 8,
-        num_hidden_layers: int = 8,
-        num_key_value_heads: int = 2,
-        vocab_size: int = 6400,
-        rms_norm_eps: float = 1e-05,
-        rope_theta: int = 1000000,
-        inference_rope_scaling: bool = False,
-        flash_attention: bool = True,
-        ############ MoE ############
-        use_moe: bool = False,
-        num_experts_per_tok: int = 2,
-        n_routed_experts: int = 4,
-        n_shared_experts: int = 1,
-        scoring_func: str = "softmax",
-        aux_loss_alpha: float = 0.01,
-        seq_aux: bool = True,
-        norm_topk_prob: bool = True,
-        **kwargs,
+            self,
+            dropout: float = 0.0,
+            bos_token_id: int = 1,
+            eos_token_id: int = 2,
+            hidden_act: str = "silu",
+            hidden_size: int = 512,
+            intermediate_size: int | None = None,
+            max_position_embeddings: int = 32768,
+            num_attention_heads: int = 8,
+            num_hidden_layers: int = 8,
+            num_key_value_heads: int = 2,
+            vocab_size: int = 6400,
+            rms_norm_eps: float = 1e-05,
+            rope_theta: int = 1000000,
+            inference_rope_scaling: bool = False,
+            flash_attention: bool = True,
+            ############ MoE ############
+            use_moe: bool = False,
+            num_experts_per_tok: int = 2,
+            n_routed_experts: int = 4,
+            n_shared_experts: int = 1,
+            scoring_func: str = "softmax",
+            aux_loss_alpha: float = 0.01,
+            seq_aux: bool = True,
+            norm_topk_prob: bool = True,
+            **kwargs,
     ):
         super().__init__(**kwargs)
 
@@ -70,3 +72,17 @@ class ZeusMindConfig(PretrainedConfig):
             if self.inference_rope_scaling
             else None
         )
+
+
+class RMSNorm(nn.Module):
+    def __init__(self, dim: int = 768, eps: float = 1e-5):
+        super().__init__()
+        self.dim = dim
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def _norm(self, x):
+        return torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+    def forward(self, x):
+        return self.weight * self._norm(x)

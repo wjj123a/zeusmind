@@ -1,3 +1,6 @@
+import math
+from typing import Optional
+
 import torch
 import torch.nn as nn
 from transformers import PretrainedConfig
@@ -77,7 +80,6 @@ class ZeusMindConfig(PretrainedConfig):
 class RMSNorm(nn.Module):
     def __init__(self, dim: int = 768, eps: float = 1e-5):
         super().__init__()
-        self.dim = dim
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(dim))
 
@@ -85,4 +87,52 @@ class RMSNorm(nn.Module):
         return torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
 
     def forward(self, x):
-        return self.weight * self._norm(x)
+        return self.weight * self._norm(x).type_as(x)
+
+
+def precompute_freqs_cis(
+        dim: int = 768,
+        end: int = 32 * 1024,
+        rope_base: float = 1e6,
+        rope_scaling: Optional[dict] = None,
+):
+    freqs = torch.tensor(1.0) / (
+            rope_base ** (torch.arange(0, dim, 2)[: dim // 2] / dim)
+    )
+    attn_factor = 1.0
+
+    if rope_scaling is not None:
+        origin_max = int(rope_scaling["original_max_position_embeddings"])
+        factor = float(rope_scaling["factor"])
+        beta_fast = float(rope_scaling["beta_fast"])
+        beta_slow = float(rope_scaling["beta_slow"])
+        attn_factor = float(rope_scaling.get("attention_factor", 1.0))
+
+        if end > origin_max:
+            inv_dim = lambda b: (
+                                        math.log(origin_max / (2 * math.pi * b)) * dim
+                                ) / (2 * math.log(rope_base))
+
+            low = max(math.floor(inv_dim(beta_fast)), 0)
+            high = min(math.ceil(inv_dim(beta_slow)), dim // 2 - 1)
+
+            idx = torch.arange(dim // 2, device=freqs.device, dtype=freqs.dtype)
+            ramp = torch.clamp((idx - low) / max(high - low, 0.001), 0, 1)
+
+            freqs = freqs * (1 - ramp + ramp / factor)
+
+    t = torch.arange(end, device=freqs.device, dtype=freqs.dtype)
+    freqs = torch.outer(t, freqs).float()
+    freqs_cos = torch.cat([torch.cos(freqs), torch.cos(freqs)], dim=-1) * attn_factor
+    freqs_sin = torch.cat([torch.sin(freqs), torch.sin(freqs)], dim=-1) * attn_factor
+    return freqs_cos, freqs_sin
+
+
+def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+    def rotate_half(x):
+        return torch.cat((-x[..., x.shape[-1] // 2:], x[..., :x.shape[-1] // 2]), dim=-1)
+
+    q_embed = q * cos.unsqueeze(dim=unsqueeze_dim) + rotate_half(q) * sin.unsqueeze(dim=unsqueeze_dim)
+    k_embed = k * cos.unsqueeze(dim=unsqueeze_dim) + rotate_half(k) * sin.unsqueeze(dim=unsqueeze_dim)
+
+    return q_embed, k_embed

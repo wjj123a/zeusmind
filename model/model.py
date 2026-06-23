@@ -317,7 +317,7 @@ class ZeusForCausalLM(PreTrainedModel, GenerationMixin):
 
     def forward(self, input_ids: torch.Tensor, attention_mask: Optional[torch.Tensor] = None,
                 past_key_values: Optional[list[Optional[tuple[torch.Tensor, torch.Tensor]]]] = None,
-                use_cache: bool = False,
+                use_cache: bool = False, labels: Optional[torch.Tensor] = None,
                 logits_to_keep: Union[int, torch.Tensor] = 0, **kwargs):
         hidden_states, present_key_values = self.model(input_ids=input_ids, attention_mask=attention_mask,
                                                        past_key_values=past_key_values,
@@ -332,7 +332,18 @@ class ZeusForCausalLM(PreTrainedModel, GenerationMixin):
             logits_hidden_states = hidden_states[:, logits_to_keep, :]
 
         logits = self.lm_head(logits_hidden_states)
+        loss = None
+        if labels is not None:
+            shift_logits = logits[:, :-1, :].contiguous()
+            shift_labels = labels[:, 1:].contiguous()
+
+            loss = F.cross_entropy(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1),
+                ignore_index=-100,
+            )
         return CausalLMOutputWithPast(
+            loss=loss,
             logits=logits,
             past_key_values=present_key_values,
             hidden_states=hidden_states,

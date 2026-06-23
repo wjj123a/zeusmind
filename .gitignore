@@ -6,16 +6,17 @@ dist/
 wheels/
 *.egg-info
 
-.jsonl
-.log
-.pth
-.json
-.msc
-.txt
+*.jsonl
+*.log
+*.pth
+*.json
+*.msc
+*.txt
 
 # Virtual environments
 .venv
 *.xml
 *.iml
 .idea
+
 
